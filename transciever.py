@@ -6,14 +6,65 @@ import time
 import paho.mqtt.client as paho
 # pip install rpi-rfm69
 
-class LoRaMQTTClient:
-    def __init__(self, node_id, network_id, recipient_id, broker, port, topic):
-        # For LoRa
+# Multithreading
+import threading
+import queue
+
+class RadioC:
+    """
+    Encapsulates the radio.
+    """
+    def __init__(self, node_id, network_id, recipient_id):
         self.node_id = node_id
         self.network_id = network_id
         self.recipient_id = recipient_id
-        self.radio = None
         self.radioOn = False
+        self.initalizeLoRaRadio()
+
+    def initalizeLoRaRadio(self):
+        self.radio = Radio(FREQ_915MHZ, self.node_id, self.network_id, isHighPower=True, verbose=True)
+        self.radioOn = True
+
+    def getRFData(self):
+        if self.radioOn == False:
+            return None
+        # Every 10 seconds get packets
+        print("Getting packets")
+        # Process packets
+        packets = []
+        for packet in self.radio.get_packets():
+            packets.append(packet)
+        return packets
+
+class RadioThread(threading.Thread):
+    """
+    Create a background thread for constantly listening incoming transmissions from
+    the LoRa Radio.
+    """
+    def __init__(self, radio, threadID, name, q, qLock):
+        threading.Thread.__init__(self)
+        self.threadID = threadID
+        self.name = name
+        self.queue = q
+        self.qLock = qLock
+        self.radio = radio
+
+    def run(self):
+        """ Run the thread """
+        while True:
+            packets = self.radio.getRFData()
+            if packets == None and len(packets) == 0:
+                continue
+            else:
+                self.qLock.acquire()
+                self.queue.put(packets.copy())
+                self.qLock.release()
+                time.sleep(0.5)
+
+class LoRaMQTTClient:
+    def __init__(self, node_id, network_id, recipient_id, broker, port, topic):
+        # For LoRa
+        self.radio = RadioC(node_id, network_id, recipient_id)
 
         # For MQTT
         self.broker = broker
@@ -21,6 +72,11 @@ class LoRaMQTTClient:
         self.topic = topic
         self.conn_flag = False
         self.client = None
+
+        # For the thread
+        self.queue = queue.Queue(100)
+        self.lock = threading.Lock()
+        self.rThread = RadioThread(self.radio, 1, "RadioThread", self.queue, self.lock)
 
     # Functions for client
     def on_connect(self, client, userdata, flags, rc):
@@ -45,28 +101,9 @@ class LoRaMQTTClient:
         self.client.on_connect = self.on_connect
         self.client.on_disconnect = self.on_disconnect
 
-    def initalizeLoRaRadio(self):
-        self.radio = Radio(FREQ_915MHZ, self.node_id, self.network_id, isHighPower=True, verbose=True)
-        self.radioOn = True
-
-    def getRFData(self, rx_counter):
-        if self.radioOn == False:
-            return None
-        # Every 10 seconds get packets
-        if rx_counter > 10:
-            rx_counter = 0
-            print("Getting packets")
-            # Process packets
-            packets = []
-            for packet in self.radio.get_packets():
-                packets.append(packet)
-            return packets
-        return None
-
     def run(self):
         print ("Starting loop...")
-        
-        rx_counter = 0
+
         delay = 0.5
         packets = []
         # Connect
@@ -75,19 +112,22 @@ class LoRaMQTTClient:
             time.sleep(1)
             self.client.loop()
 
+        self.thread.start()
         while True:
             # Get the packets from rfm
-            packets = self.getRFData(rx_counter)
+            packets = []
+            self.lock.acquire()
+            if not self.queue.empty():
+                packets = self.queue.get()
+            self.lock.release()
             # Send data to broker
             if packets != None and len(packets) != 0:
                 self.client.publish(self.topic, " ".join(packets))
-                self.client.loop()            
-
-            rx_counter += delay
+                self.client.loop()
             time.sleep(delay)
 
-            print("Sending packet Hello")
-            self.client.publish(self.topic, "Hello")
+            #print("Sending packet Hello")
+            #self.client.publish(self.topic, "Hello")
             self.client.loop()
 
 # Post quantum:
