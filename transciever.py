@@ -29,11 +29,12 @@ class RadioC:
         if self.radioOn == False:
             return None
         # Every 10 seconds get packets
-        print("Getting packets")
         # Process packets
         packets = []
         for packet in self.radio.get_packets():
             packets.append(packet)
+        if len(packets) != 0:
+            print("Getting packets") 
         return packets
 
 class RadioThread(threading.Thread):
@@ -104,7 +105,7 @@ class LoRaMQTTClient:
     def run(self):
         print ("Starting loop...")
 
-        delay = 0.5
+        delay = 5
         packets = []
         # Connect
         self.client.connect(self.broker, self.port)
@@ -112,7 +113,7 @@ class LoRaMQTTClient:
             time.sleep(1)
             self.client.loop()
 
-        self.thread.start()
+        self.rThread.start()
         while True:
             # Get the packets from rfm
             packets = []
@@ -125,7 +126,7 @@ class LoRaMQTTClient:
                 self.client.publish(self.topic, " ".join(packets))
                 self.client.loop()
             time.sleep(delay)
-
+            print("Hello")
             #print("Sending packet Hello")
             #self.client.publish(self.topic, "Hello")
             self.client.loop()
@@ -147,5 +148,4 @@ class LoRaMQTTClient:
 if __name__ == '__main__':
     client = LoRaMQTTClient(1, 0, 2, '192.168.1.99', 8883, "test/topic")
     client.createMQTTClient("Test", "/home/pi/Documents/certs/c3/ca.crt", "ECDHE-ECDSA-AES128-SHA256")
-    client.initalizeLoRaRadio()
     client.run()
