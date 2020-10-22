@@ -53,14 +53,14 @@ class RadioThread(threading.Thread):
     def run(self):
         """ Run the thread """
         while True:
+            time.sleep(1)
             packets = self.radio.getRFData()
-            if packets == None and len(packets) == 0:
+            if packets == None or len(packets) == 0:
                 continue
             else:
                 self.qLock.acquire()
                 self.queue.put(packets.copy())
                 self.qLock.release()
-                time.sleep(0.5)
 
 class LoRaMQTTClient:
     def __init__(self, node_id, network_id, recipient_id, broker, port, topic):
@@ -105,7 +105,7 @@ class LoRaMQTTClient:
     def run(self):
         print ("Starting loop...")
 
-        delay = 5
+        delay = 1
         packets = []
         # Connect
         self.client.connect(self.broker, self.port)
@@ -120,6 +120,7 @@ class LoRaMQTTClient:
             self.lock.acquire()
             if not self.queue.empty():
                 packets = self.queue.get()
+                print(packets)
             self.lock.release()
             # Send data to broker
             if packets != None and len(packets) != 0:
