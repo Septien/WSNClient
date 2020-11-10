@@ -45,10 +45,10 @@ class ArduinoC:
             self.ardOn = True
 
     def getData(self):
-        if not self.radioOn:
+        if not self.ardOn:
             return None
         message = self.arduino.read_until() # End of line
-        return message.decode('ascii')
+        return [message.decode('ascii')[:12]]
 
 class ArduinoThread(threading.Thread):
     """
@@ -71,9 +71,9 @@ class ArduinoThread(threading.Thread):
         while not finish:
             time.sleep(1)
             message = self.arduino.getData()
-            if len(packets) > 0:
+            if message:
                 self.qLock.acquire()
-                self.queue.put(message.copy())
+                self.queue.put(message)
                 self.qLock.release()
             # Process thread termination
             self.exitL.acquire()
