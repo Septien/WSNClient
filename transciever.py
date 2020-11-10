@@ -6,8 +6,8 @@ import datetime
 import time
 import ssl
 
-# Radio and MQTT
-from RFM69 import Radio, FREQ_915MHZ
+# Arduino and MQTT
+import serial
 import paho.mqtt.client as paho
 # pip install rpi-rfm69
 
@@ -26,47 +26,36 @@ def handler(signum, frame):
     interrupt = True
     print("Killing process")
 
-class RadioC:
+class ArduinoC:
     """
-    Encapsulates the radio.
+    Connect arduino uno directly to the raspberry, and use it t0 access the radio.
     """
-    def __init__(self, node_id, network_id, recipient_id):
-        self.node_id = node_id
-        self.network_id = network_id
-        self.recipient_id = recipient_id
-        self.radioOn = False
-        self.initalizeLoRaRadio()
+    def __init__(self, port, baudrate):
+        self.port = port
+        self.baudrate = baudrate
+        self.ardOn = False
+        self.initalizeArduino()
 
-    def initalizeLoRaRadio(self):
-        self.radio = Radio(FREQ_915MHZ, self.node_id, self.network_id, isHighPower=True, verbose=True)
-        self.radio.set_power_level(100)
-        self.radio.calibrate_radio()
-        self.radioOn = True
+    def initalizeArduino(self):
+        try:
+            self.arduino = serial.Serial(self.port, self.baudrate)
+        except:
+            print("Arduino not connected")
+        else:
+            self.ardOn = True
 
-    def getRFData(self):
+    def getData(self):
         if not self.radioOn:
             return None
-        self.radio.begin_receive()
-        # Every 10 seconds get packets
-        # Process packets
-        t = self.radio.read_temperature()
-        packets = []
-        if self.radio.has_received_packet():
-            for packet in self.radio.get_packets():
-                packets.append(packet)
-            if len(packets) != 0:
-                print("Getting packets") 
-        else:
-            pass
-            #packets = [str(t)]
-        return packets
+        message = self.arduino.read_until() # End of line
+        return message.decode('ascii')
 
-class RadioThread(threading.Thread):
+class ArduinoThread(threading.Thread):
     """
     Create a background thread for constantly listening incoming transmissions from
     the LoRa Radio.
     """
-    def __init__(self, radio, threadID, name, q, qLock, exitQ, exitL):
+    def __init__(self, arduino, threadID, name, q, qLock, exitQ, exitL):
         threading.Thread.__init__(self)
         self.threadID = threadID
         self.name = name
@@ -74,17 +63,17 @@ class RadioThread(threading.Thread):
         self.qLock = qLock
         self.exitQ = exitQ
         self.exitL = exitL
-        self.radio = radio
+        self.arduino = arduino
 
     def run(self):
         """ Run the thread """
         finish = False
         while not finish:
             time.sleep(1)
-            packets = self.radio.getRFData()
+            message = self.arduino.getData()
             if len(packets) > 0:
                 self.qLock.acquire()
-                self.queue.put(packets.copy())
+                self.queue.put(message.copy())
                 self.qLock.release()
             # Process thread termination
             self.exitL.acquire()
@@ -94,9 +83,9 @@ class RadioThread(threading.Thread):
             self.exitL.release()
 
 class LoRaMQTTClient:
-    def __init__(self, node_id, network_id, recipient_id, broker, port, topic):
+    def __init__(self, arPort, baudrate, broker, port, topic):
         # For LoRa
-        self.radio = RadioC(node_id, network_id, recipient_id)
+        self.arduino = ArduinoC(arPort, baudrate)
 
         # For MQTT
         self.broker = broker
@@ -110,7 +99,7 @@ class LoRaMQTTClient:
         self.lock = threading.Lock()
         self.exitQ = queue.Queue(1)
         self.exitL = threading.Lock()
-        self.rThread = RadioThread(self.radio, 1, "RadioThread", self.queue, self.lock, self.exitQ, self.exitL)
+        self.aThread = ArduinoThread(self.arduino, 1, "RadioThread", self.queue, self.lock, self.exitQ, self.exitL)
 
     # Functions for client
     def on_connect(self, client, userdata, flags, rc):
@@ -147,7 +136,7 @@ class LoRaMQTTClient:
             time.sleep(1)
             self.client.loop()
 
-        self.rThread.start()
+        self.aThread.start()
         while True:
             # Get the packets from rfm
             packets = []
@@ -181,7 +170,7 @@ class LoRaMQTTClient:
         self.exitL.acquire()
         self.exitQ.put(-1)
         self.exitL.release()
-        self.rThread.join()
+        self.aThread.join()
 
         # Terminate MQTT client
         self.client.loop()
@@ -204,6 +193,6 @@ class LoRaMQTTClient:
 if __name__ == '__main__':
     # Set the signal interrupt handler
     signal.signal(signal.SIGINT, handler)
-    client = LoRaMQTTClient(1, 69, 2, '192.168.1.99', 8883, "test/topic")
+    client = LoRaMQTTClient("/dev/ttyACM1", 9600, '192.168.1.99', 8883, "test/topic")
     client.createMQTTClient("Test", "/home/pi/Documents/certs/c3/ca.crt", ssl.PROTOCOL_TLSv1_2, "NEWHOPE512-ECDSA-AES128-GCM-SHA256")
     client.run()
