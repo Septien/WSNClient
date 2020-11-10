@@ -4,6 +4,7 @@
 import signal, os
 import datetime
 import time
+import ssl
 
 # Radio and MQTT
 from RFM69 import Radio, FREQ_915MHZ
@@ -22,8 +23,8 @@ def handler(signum, frame):
     Handle the KeyboardInterrupt signal
     """
     global interrupt
-    if signum == signal.SIGINT:
-        interrupt = True
+    interrupt = True
+    print("Killing process")
 
 class RadioC:
     """
@@ -35,22 +36,29 @@ class RadioC:
         self.recipient_id = recipient_id
         self.radioOn = False
         self.initalizeLoRaRadio()
-        print(self.radio.read_temperature())
 
     def initalizeLoRaRadio(self):
         self.radio = Radio(FREQ_915MHZ, self.node_id, self.network_id, isHighPower=True, verbose=True)
+        self.radio.set_power_level(100)
+        self.radio.calibrate_radio()
         self.radioOn = True
 
     def getRFData(self):
-        if self.radioOn == False:
+        if not self.radioOn:
             return None
+        self.radio.begin_receive()
         # Every 10 seconds get packets
         # Process packets
+        t = self.radio.read_temperature()
         packets = []
-        for packet in self.radio.get_packets():
-            packets.append(packet)
-        if len(packets) != 0:
-            print("Getting packets") 
+        if self.radio.has_received_packet():
+            for packet in self.radio.get_packets():
+                packets.append(packet)
+            if len(packets) != 0:
+                print("Getting packets") 
+        else:
+            pass
+            #packets = [str(t)]
         return packets
 
 class RadioThread(threading.Thread):
@@ -74,9 +82,7 @@ class RadioThread(threading.Thread):
         while not finish:
             time.sleep(1)
             packets = self.radio.getRFData()
-            if packets == None or len(packets) == 0:
-                continue
-            else:
+            if len(packets) > 0:
                 self.qLock.acquire()
                 self.queue.put(packets.copy())
                 self.qLock.release()
@@ -118,10 +124,10 @@ class LoRaMQTTClient:
         print("client disconnect ok")
         self.conn_flag = False
 
-    def createMQTTClient(self, clientName, tlsRoute, ciphers):
+    def createMQTTClient(self, clientName, tlsRoute, tlsVersion, ciphers):
         # Attributes
         self.client = paho.Client(clientName)
-        self.client.tls_set(tlsRoute)
+        self.client.tls_set(tlsRoute, tls_version=tlsVersion)
         self.client.tls_insecure_set(True)
 
         # Functions
@@ -146,22 +152,19 @@ class LoRaMQTTClient:
             # Get the packets from rfm
             packets = []
             self.lock.acquire()
-            if not self.queue.empty():
+            while not self.queue.empty():
                 packets = self.queue.get()
                 print(packets)
-            self.lock.release()
-            # Send data to broker
-            if packets != None and len(packets) != 0:
+                # Send data to broker
                 self.client.publish(self.topic, " ".join(packets))
                 self.client.loop()
+            self.lock.release()
             time.sleep(delay)
-            print("Hello")
-            #print("Sending packet Hello")
-            #self.client.publish(self.topic, "Hello")
             self.client.loop()
             if interrupt:
                 break
         self.disconnect()
+        print("Finishing")
     
     def disconnect(self):
         """
@@ -173,19 +176,19 @@ class LoRaMQTTClient:
             packets = self.queue.get()
             self.client.publish(self.topic, " ".join(packets))
         self.lock.release()
+
         # Terminate thread
         self.exitL.acquire()
         self.exitQ.put(-1)
         self.exitL.release()
         self.rThread.join()
-        
+
         # Terminate MQTT client
-        self.client.wait_for_publish()
         self.client.loop()
         self.client.disconnect()
 
 # Post quantum:
-# NEWHOPE-ECDSA-AES128-GCM-SHA256
+# NEWHOPE512-ECDSA-AES128-GCM-SHA256
 #        -RSA
 
 # Classical ciphers to use:
@@ -199,6 +202,8 @@ class LoRaMQTTClient:
 #/home/pi/Documents/certs/c3
 
 if __name__ == '__main__':
-    client = LoRaMQTTClient(1, 0, 2, '192.168.1.99', 8883, "test/topic")
-    client.createMQTTClient("Test", "/home/pi/Documents/certs/c3/ca.crt", "ECDHE-ECDSA-AES128-SHA256")
+    # Set the signal interrupt handler
+    signal.signal(signal.SIGINT, handler)
+    client = LoRaMQTTClient(1, 69, 2, '192.168.1.99', 8883, "test/topic")
+    client.createMQTTClient("Test", "/home/pi/Documents/certs/c3/ca.crt", ssl.PROTOCOL_TLSv1_2, "NEWHOPE512-ECDSA-AES128-GCM-SHA256")
     client.run()
