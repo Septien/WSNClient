@@ -48,7 +48,8 @@ class ArduinoC:
         if not self.ardOn:
             return None
         message = self.arduino.read_until() # End of line
-        return [message.decode('ascii')[:12]]
+        packet = message[:13]
+        return [packet.decode('ascii')]
 
 class ArduinoThread(threading.Thread):
     """
@@ -193,6 +194,6 @@ class LoRaMQTTClient:
 if __name__ == '__main__':
     # Set the signal interrupt handler
     signal.signal(signal.SIGINT, handler)
-    client = LoRaMQTTClient("/dev/ttyACM1", 9600, '192.168.1.99', 8883, "test/topic")
+    client = LoRaMQTTClient("/dev/ttyACM0", 9600, '192.168.1.99', 8883, "test/topic")
     client.createMQTTClient("Test", "/home/pi/Documents/certs/c3/ca.crt", ssl.PROTOCOL_TLSv1_2, "NEWHOPE512-ECDSA-AES128-GCM-SHA256")
     client.run()
