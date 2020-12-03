@@ -8,7 +8,6 @@ import ssl
 
 # Arduino and MQTT
 import serial
-import paho.mqtt.client as paho
 # pip install rpi-rfm69
 
 # Multithreading
@@ -92,8 +91,8 @@ class LoRaMQTTClient:
         self.broker = broker
         self.port = port
         self.topic = topic
-        self.conn_flag = False
-        self.client = None
+        self.group = None
+        self.ca = None
 
         # For the thread
         self.queue = queue.Queue(100)
@@ -102,28 +101,31 @@ class LoRaMQTTClient:
         self.exitL = threading.Lock()
         self.aThread = ArduinoThread(self.arduino, 1, "RadioThread", self.queue, self.lock, self.exitQ, self.exitL)
 
-    # Functions for client
-    def on_connect(self, client, userdata, flags, rc):
-        self.conn_flag = True
-        print("connected", self.conn_flag)
+    def setTLSGroups(self, groups):
+        """
+        Select a group for key exchange.
+        """
+        self.group = group
 
-    def on_log(self, client, userdata, level, buf):
-        print("buffer", buf)
+    def setCACert(self, cafile):
+        """
+        Set CA file.
+        """
+        self.ca = cafile
 
-    def on_disconnect(self, client, userdata, rc):
-        print("client disconnect ok")
-        self.conn_flag = False
-
-    def createMQTTClient(self, clientName, tlsRoute, tlsVersion, ciphers):
-        # Attributes
-        self.client = paho.Client(clientName)
-        self.client.tls_set(tlsRoute, tls_version=tlsVersion)
-        self.client.tls_insecure_set(True)
-
-        # Functions
-        self.client.on_log = self.on_log
-        self.client.on_connect = self.on_connect
-        self.client.on_disconnect = self.on_disconnect
+    def publish(self, packet):
+        """
+        There is no client API that currently supports TLS 1.3.
+        I have modified the mosquitto clients to use TLS 1.3, so I will
+        publish the data with it.
+        """
+        if is not self.ca or not self.groups:
+            print("Can't publish: missing ca file or groups.")
+            return
+        cmd = "mosquitto_pub -h " + self.broker + " -t " + self.topic + " -p 8883"
+        cmd += " --cafile " + self.ca + " --groups " + self.groups + " --tls-version tlsv1.3"
+        cmd + " -m " + str(packet)
+        os.system(cmd)
 
     def run(self):
         global interrupt
@@ -131,11 +133,6 @@ class LoRaMQTTClient:
 
         delay = 1
         packets = []
-        # Connect
-        self.client.connect(self.broker, self.port)
-        while not self.conn_flag:
-            time.sleep(1)
-            self.client.loop()
 
         self.aThread.start()
         while True:
@@ -146,11 +143,8 @@ class LoRaMQTTClient:
                 packets = self.queue.get()
                 print(packets)
                 # Send data to broker
-                self.client.publish(self.topic, " ".join(packets))
-                self.client.loop()
             self.lock.release()
             time.sleep(delay)
-            self.client.loop()
             if interrupt:
                 break
         self.disconnect()
@@ -164,7 +158,7 @@ class LoRaMQTTClient:
         self.lock.acquire()
         while not self.queue.empty():
             packets = self.queue.get()
-            self.client.publish(self.topic, " ".join(packets))
+            #   
         self.lock.release()
 
         # Terminate thread
@@ -173,27 +167,10 @@ class LoRaMQTTClient:
         self.exitL.release()
         self.aThread.join()
 
-        # Terminate MQTT client
-        self.client.loop()
-        self.client.disconnect()
-
-# Post quantum:
-# NEWHOPE512-ECDSA-AES128-GCM-SHA256
-#        -RSA
-
-# Classical ciphers to use:
-# RSA: 
-# AES128-GCM-SHA256
-
-# Ec:
-# ECDHE-ECDSA-AES128-SHA
-# ECDHE-RSA-AES128-SHA
-
-#/home/pi/Documents/certs/c3
-
 if __name__ == '__main__':
     # Set the signal interrupt handler
     signal.signal(signal.SIGINT, handler)
     client = LoRaMQTTClient("/dev/ttyACM0", 9600, '192.168.1.99', 8883, "test/topic")
-    client.createMQTTClient("Test", "/home/pi/Documents/certs/c3/ca.crt", ssl.PROTOCOL_TLSv1_2, "NEWHOPE512-ECDSA-AES128-GCM-SHA256")
+    client.setCACert("/home/pi/Documents/certs/pqcerts/ca.crt")
+    client.setTLSGroups("kyber512")
     client.run()
