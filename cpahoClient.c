@@ -74,7 +74,7 @@ int main(int argc, char **argv)
     cf.clientid = "Test";
     cf.topic = "test/topic";
     cf.payload = "Hello there! From paho C";
-    cf.qos = 2;
+    cf.qos = 1;
     cf.timeout = 10000L;
 
     char *capath = "/home/jash/Documentos/Maestria/certs/pqcerts2/ca.crt";
