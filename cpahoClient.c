@@ -25,7 +25,6 @@ struct threadData {
 */
 void createClient(MQTTClient *client, struct clientInfo *cf, char *capath, char *group)
 {
-    client = (MQTTClient *)malloc(sizeof(MQTTClient));
     MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
     MQTTClient_SSLOptions ssl_opts = MQTTClient_SSLOptions_initializer;
     int rc;
@@ -57,8 +56,8 @@ void delivereMessage(MQTTClient *client, struct clientInfo *cf)
     pubmsg.payloadlen = strlen(cf->payload);
     pubmsg.qos = cf->qos;
     pubmsg.retained = 0;
-    MQTTClient_publishMessage(client, cf->topic, &pubmsg, &token);
-    rc = MQTTClient_waitForCompletion(client, token, cf->timeout);
+    MQTTClient_publishMessage(*client, cf->topic, &pubmsg, &token);
+    rc = MQTTClient_waitForCompletion(*client, token, cf->timeout);
     printf("Message: %s sent.\n", (char *)pubmsg.payload);
     printf("\nMessage with delivery token %d delivered\n", token);
 }
@@ -70,7 +69,7 @@ int main(int argc, char **argv)
     int rc;
 
     /* Configure client options */
-    cf.address = "ssl://192.168.1.99";
+    cf.address = "ssl://192.168.1.99:8883";
     cf.clientid = "Test";
     cf.topic = "test/topic";
     cf.payload = "Hello there! From paho C";
