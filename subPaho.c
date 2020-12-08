@@ -90,7 +90,7 @@ void onConnect(void *context, MQTTAsync_successData *response)
     int rc;
 
     printf("Connection successful.\n");
-    printf("Subscribing to topic %s.\n for client %s using QoS%d.\n\n Press Q<Enter> to exit", TOPIC, CLIENTID, QOS);
+    printf("Subscribing to topic %s.\n for client %s using QoS%d.\n\n Press Q<Enter> to exit.\n", TOPIC, CLIENTID, QOS);
     opts.onSuccess = onSubscribe;
     opts.onFailure = onSubscribeFailure;
 

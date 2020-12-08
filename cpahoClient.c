@@ -3,6 +3,9 @@
 #include <string.h>
 #include "MQTTClient.h"
 #include <pthread.h>
+#include <signal.h>
+#include <wiringPi.h>
+#include <wiringSerial.h>
 
 struct clientInfo {
     char *address;
@@ -13,12 +16,109 @@ struct clientInfo {
     unsigned long int timeout;
 };
 
-struct threadData {
-    char data[100];
-    int out;
-    pthread_mutex_t dataMutex;
-    pthread_mutex_t outMutex;
-};
+/* Global variables and mutex */
+char data[100];                 // Recieved data from Arduino
+int withData = 0;               // Does the array has data?
+int out = 0;                    // Exit thread
+pthread_mutex_t dataMutex;      // Set data mutex.
+pthread_mutex_t withDataM;       // Acces data availability
+pthread_mutex_t outMutex;       // Out mutex
+int finishP = 0;
+
+/* Handle keyboard interruption Ctrl+C */
+void handles(int sig)
+{
+    printf("Finishing program.\n");
+    finishP = 1;
+}
+
+void *readArduino(void *data)
+{
+    // Open connection to serial port
+    int serialPort;
+    int finish = 0;
+    int n, i;
+
+    printf("Connecting to arduino on port: /devv/ttyS0.\n");
+    if ((serialPort = serialOpen("/dev/ttyS0", 9600)))
+    {
+        fprintf(stderr, "Unable to open serial device: %s.\n", strerror(errno));
+        pthread_exit((void*)0);
+    }
+
+    if (wiring_setup() == -1)
+    {
+        fprintf(stderr, "Unable to start wiringPi: %s\n", strerror(errno));
+        pthread_exit((void*)0);
+    }
+
+    while(!finish)
+    {
+        n = serialDataAvail(serialPort);
+        if (n > 0)
+        {
+            // Lock mutex and copy data to array
+            pthread_mutex_lock(&dataMutex);
+            for (i = 0; i < n; i++)
+                data[i] = serialGetChar(serialPort);
+            data[n] = '\0';
+            pthread_mutex_unlock(&dataMutex);
+            pthread_mutex_lock(&withDataM);
+            withData = 1;
+            pthread_mutex_unlock(&withDataM);
+        }
+        // Check if thread should finish
+        pthread_mutex_lock(&outMutex);
+        if (out)
+            finish = 1;
+        pthread_mutex_unlock(&outMutex);
+    }
+
+    printf("Finishing arduino thread");
+    pthread_exit((void*)0);
+}
+
+void createThread(pthread_t *thread)
+{
+    pthread_attr_t attr;
+    int rc;
+
+    // Create mutex
+    pthread_mutex_init(&dataMutex, NULL);
+    pthread_mutex_init(&outMutex, NULL);
+    pthread_mutex_init(&withDataM, NULL);
+
+    // Initialize attribute and set to joinable
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+    // Create thread
+    rc = pthread_create(thread, &attr, readArduino, NULL);
+    if (rc)
+    {
+        printf("ERROR; return code from pthread_create() is %d\n", rc);
+        exit(-1);
+    }
+}
+
+void destroyThread(pthread_t *thread)
+{
+    void *status;
+    int rc;
+
+    // Destroy mutex
+    pthread_mutex_destroy(&dataMutex);
+    pthread_mutex_destroy(&outMutex);
+    pthread_mutex_destroy(&withDataM);
+    
+    rc = pthread_join(*thread, &status);
+    if (rc)
+    {
+        printf("ERROR; return code from pthread_join() is %d\n", rc);
+        exit(-1);
+    }
+    printf("Completed thread join with status %ld\n", (long)status);
+}
 
 /*
 *   Create the client structure with necessary data.
@@ -61,11 +161,47 @@ void delivereMessage(MQTTClient *client, struct clientInfo *cf)
     printf("Message: %s sent.\n", (char *)pubmsg.payload);
     printf("\nMessage with delivery token %d delivered\n", token);
 }
+void run(MQTTClient *client, struct clientInfo *cf)
+{
+    int read = 0;
+    printf("Publishing to topic %s, with client %s.\n", cf->topic, cf->clientid);
+    while (!finishP)
+    {
+        // Is there data available
+        pthread_mutex_lock(&withDataM);
+        if (withData == 1)
+            read = 1;
+        else
+            read = 0;
+        pthread_mutex_unlock(&withDataM);
+        if (read == 1)
+        {
+            // Send data to broker
+            if (cf->payload)
+                free((void*)cf->payload);
+            pthread_mutex_lock(&dataMutex);
+            cf->payload = strdup(data);
+            pthread_mutex_unlock(&dataMutex);
+            pthread_mutex_lock(&withDataM);
+            withData = 0;
+            pthread_mutex_unlock(&withDataM);
+            delivereMessage(&client, &cf);
+        }   
+    }
+    printf("Sending signal to finish thread.\n");
+    pthread_mutex_lock(&outMutex);
+    out = 1;
+    pthread_mutex_unlock(&outMutex);
+    printf("Finishing main program.");
+}
 
 int main(int argc, char **argv)
 {
+    //Set signal handler
+    signal(SIGINT, handles);
     struct clientInfo cf;
     MQTTClient client;
+    pthread_t thread;
     int rc;
 
     /* Configure client options */
@@ -79,11 +215,11 @@ int main(int argc, char **argv)
     char *capath = "/home/jash/Documentos/Maestria/certs/pqcerts2/ca.crt";
     char *group = "lightsaber";
     createClient(&client, &cf, capath, group);
-
-    printf("Waiting for up to %d seconds for publication of %s\non topic %s for client with ClientID: %s.\n", (int)(cf.timeout/1000), cf.payload, cf.topic, cf.clientid);
-    delivereMessage(&client, &cf);
+    createThread(&thread);
     
+    destroyThread(&thread);
     MQTTClient_disconnect(client, 10000);
     MQTTClient_destroy(&client);
-    return 0;
+
+    pthread_exit(NULL);
 }
