@@ -25,6 +25,7 @@ pthread_mutex_t dataMutex;      // Set data mutex.
 pthread_mutex_t withDataM;       // Acces data availability
 pthread_mutex_t outMutex;       // Out mutex
 int finishP = 0;
+volatile MQTTClient_deliveryToken deliveredToken;
 
 /* Handle keyboard interruption Ctrl+C */
 void handles(int sig)
@@ -121,6 +122,24 @@ void destroyThread(pthread_t *thread)
     printf("Completed thread join with status %ld\n", (long)status);
 }
 
+/* Asynchronous call */
+void delivered(void *context, MQTTClient_deliveryToken dt)
+{
+    printf("Message with token value %d delivery confirmed.\n", dt);
+    deliveredToken = dt;
+}
+
+void msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *message)
+{
+    printf("Message arrived.\n");
+}
+
+void connlost(void *context, char *cause)
+{
+    printf("\nConnection lost.\n");
+    printf("\tCause: %s.\n", cause);
+}
+
 /*
 *   Create the client structure with necessary data.
 */
@@ -140,6 +159,7 @@ void createClient(MQTTClient *client, struct clientInfo *cf, char *capath, char 
     conn_opts.keepAliveInterval = 20;
     conn_opts.cleansession = 1;
 
+    MQTTClient_setCallbacks(*client, NULL, connlost, msgarrvd, delivered);
     printf("Creating client.\n");
     if ((rc = MQTTClient_connect(*client, &conn_opts)) != MQTTCLIENT_SUCCESS)
     {
