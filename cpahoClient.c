@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <wiringPi.h>
 #include <wiringSerial.h>
+#include <errno.h>
 
 struct clientInfo {
     char *address;
@@ -32,21 +33,21 @@ void handles(int sig)
     finishP = 1;
 }
 
-void *readArduino(void *data)
+void *readArduino(void *dataN)
 {
     // Open connection to serial port
     int serialPort;
     int finish = 0;
     int n, i;
 
-    printf("Connecting to arduino on port: /devv/ttyS0.\n");
-    if ((serialPort = serialOpen("/dev/ttyS0", 9600)))
+    printf("Connecting to arduino on port: /devv/ttyACM0.\n");
+    if ((serialPort = serialOpen("/dev/ttyACM0", 9600)) < 0)
     {
         fprintf(stderr, "Unable to open serial device: %s.\n", strerror(errno));
         pthread_exit((void*)0);
     }
 
-    if (wiring_setup() == -1)
+    if (wiringPiSetup() == -1)
     {
         fprintf(stderr, "Unable to start wiringPi: %s\n", strerror(errno));
         pthread_exit((void*)0);
@@ -60,7 +61,7 @@ void *readArduino(void *data)
             // Lock mutex and copy data to array
             pthread_mutex_lock(&dataMutex);
             for (i = 0; i < n; i++)
-                data[i] = serialGetChar(serialPort);
+                data[i] = serialGetchar(serialPort);
             data[n] = '\0';
             pthread_mutex_unlock(&dataMutex);
             pthread_mutex_lock(&withDataM);
@@ -139,6 +140,7 @@ void createClient(MQTTClient *client, struct clientInfo *cf, char *capath, char 
     conn_opts.keepAliveInterval = 20;
     conn_opts.cleansession = 1;
 
+    printf("Creating client.\n");
     if ((rc = MQTTClient_connect(*client, &conn_opts)) != MQTTCLIENT_SUCCESS)
     {
         printf("Failed to connect, return code %d\n", rc);
@@ -161,6 +163,7 @@ void delivereMessage(MQTTClient *client, struct clientInfo *cf)
     printf("Message: %s sent.\n", (char *)pubmsg.payload);
     printf("\nMessage with delivery token %d delivered\n", token);
 }
+
 void run(MQTTClient *client, struct clientInfo *cf)
 {
     int read = 0;
@@ -185,7 +188,7 @@ void run(MQTTClient *client, struct clientInfo *cf)
             pthread_mutex_lock(&withDataM);
             withData = 0;
             pthread_mutex_unlock(&withDataM);
-            delivereMessage(&client, &cf);
+            delivereMessage(client, cf);
         }   
     }
     printf("Sending signal to finish thread.\n");
@@ -212,7 +215,7 @@ int main(int argc, char **argv)
     cf.qos = 1;
     cf.timeout = 10000L;
 
-    char *capath = "/home/jash/Documentos/Maestria/certs/pqcerts2/ca.crt";
+    char *capath = "/home/pi/Documents/certs/pqcerts2/ca.crt";
     char *group = "lightsaber";
     createClient(&client, &cf, capath, group);
     createThread(&thread);
