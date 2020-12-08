@@ -18,7 +18,7 @@ struct clientInfo {
 };
 
 /* Global variables and mutex */
-char data[100];                 // Recieved data from Arduino
+char data[15];                 // Recieved data from Arduino
 int withData = 0;               // Does the array has data?
 int out = 0;                    // Exit thread
 pthread_mutex_t dataMutex;      // Set data mutex.
@@ -41,7 +41,8 @@ void *readArduino(void *dataN)
     int finish = 0;
     int n, i;
 
-    printf("Connecting to arduino on port: /devv/ttyACM0.\n");
+    // https://www.electronicwings.com/raspberry-pi/raspberry-pi-uart-communication-using-python-and-c
+    printf("Connecting to arduino on port: /dev/ttyACM0.\n");
     if ((serialPort = serialOpen("/dev/ttyACM0", 9600)) < 0)
     {
         fprintf(stderr, "Unable to open serial device: %s.\n", strerror(errno));
@@ -54,6 +55,7 @@ void *readArduino(void *dataN)
         pthread_exit((void*)0);
     }
 
+    serialFlush(serialPort);
     while(!finish)
     {
         n = serialDataAvail(serialPort);
@@ -61,10 +63,11 @@ void *readArduino(void *dataN)
         {
             // Lock mutex and copy data to array
             pthread_mutex_lock(&dataMutex);
-            for (i = 0; i < n; i++)
+            for (i = 0; i < 13; i++)
                 data[i] = serialGetchar(serialPort);
-            data[n] = '\0';
+            data[14] = '\0';
             pthread_mutex_unlock(&dataMutex);
+            serialFlush(serialPort);
             pthread_mutex_lock(&withDataM);
             withData = 1;
             pthread_mutex_unlock(&withDataM);
@@ -76,10 +79,12 @@ void *readArduino(void *dataN)
         pthread_mutex_unlock(&outMutex);
     }
 
-    printf("Finishing arduino thread");
+    serialClose(serialPort);
+    printf("Finishing arduino thread.\n");
     pthread_exit((void*)0);
 }
 
+// https://computing.llnl.gov/tutorials/pthreads/#Management
 void createThread(pthread_t *thread)
 {
     pthread_attr_t attr;
@@ -98,7 +103,7 @@ void createThread(pthread_t *thread)
     rc = pthread_create(thread, &attr, readArduino, NULL);
     if (rc)
     {
-        printf("ERROR; return code from pthread_create() is %d\n", rc);
+        printf("ERROR; return code from pthread_create() is %d.\n", rc);
         exit(-1);
     }
 }
@@ -116,10 +121,10 @@ void destroyThread(pthread_t *thread)
     rc = pthread_join(*thread, &status);
     if (rc)
     {
-        printf("ERROR; return code from pthread_join() is %d\n", rc);
+        printf("ERROR; return code from pthread_join() is %d.\n", rc);
         exit(-1);
     }
-    printf("Completed thread join with status %ld\n", (long)status);
+    printf("Completed thread join with status %ld.\n", (long)status);
 }
 
 /* Asynchronous call */
@@ -163,7 +168,7 @@ void createClient(MQTTClient *client, struct clientInfo *cf, char *capath, char 
     printf("Creating client.\n");
     if ((rc = MQTTClient_connect(*client, &conn_opts)) != MQTTCLIENT_SUCCESS)
     {
-        printf("Failed to connect, return code %d\n", rc);
+        printf("Failed to connect, return code %d.\n", rc);
         exit(EXIT_FAILURE);
     }
 }
@@ -181,7 +186,7 @@ void delivereMessage(MQTTClient *client, struct clientInfo *cf)
     MQTTClient_publishMessage(*client, cf->topic, &pubmsg, &token);
     rc = MQTTClient_waitForCompletion(*client, token, cf->timeout);
     printf("Message: %s sent.\n", (char *)pubmsg.payload);
-    printf("\nMessage with delivery token %d delivered\n", token);
+    printf("\nMessage with delivery token %d delivered.\n", token);
 }
 
 void run(MQTTClient *client, struct clientInfo *cf)
@@ -231,7 +236,7 @@ int main(int argc, char **argv)
     cf.address = "ssl://192.168.1.99:8883";
     cf.clientid = "Test";
     cf.topic = "test/topic";
-    cf.payload = "Hello there! From paho C";
+    cf.payload = NULL;
     cf.qos = 1;
     cf.timeout = 10000L;
 
@@ -239,7 +244,7 @@ int main(int argc, char **argv)
     char *group = "lightsaber";
     createClient(&client, &cf, capath, group);
     createThread(&thread);
-    
+    run(&client, &cf);
     destroyThread(&thread);
     MQTTClient_disconnect(client, 10000);
     MQTTClient_destroy(&client);
