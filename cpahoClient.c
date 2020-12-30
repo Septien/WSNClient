@@ -134,7 +134,7 @@ void delivered(void *context, MQTTClient_deliveryToken dt)
     deliveredToken = dt;
 }
 
-void msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *message)
+int msgarrvd(void *context, char *topicName, int topicLen, MQTTClient_message *message)
 {
     printf("Message arrived.\n");
 }
@@ -233,15 +233,15 @@ int main(int argc, char **argv)
     int rc;
 
     /* Configure client options */
-    cf.address = "ssl://192.168.1.99:8883";
+    cf.address = "ssl://13.65.102.222:8883";
     cf.clientid = "Test";
     cf.topic = "test/topic";
     cf.payload = NULL;
     cf.qos = 1;
     cf.timeout = 10000L;
 
-    char *capath = "/home/pi/Documents/certs/pqcerts2/ca.crt";
-    char *group = "lightsaber";
+    char *capath = "/home/pi/Documents/certs/azure/ca.crt";
+    char *group = "kyber512";
     createClient(&client, &cf, capath, group);
     createThread(&thread);
     run(&client, &cf);
