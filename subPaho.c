@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include "MQTTAsync.h"
 
-#define ADDRESS "ssl://192.168.1.99"
+#define ADDRESS "ssl://13.65.102.222:8883"
 #define CLIENTID "Test2"
 #define TOPIC "test/topic"
 #define PAYLOAD "Hello"
@@ -119,8 +119,7 @@ int main(int argc, char **argv)
     /* Configure SSL client options */
     ssl_opts.enableServerCertAuth = 0;
     ssl_opts.enabledGroups = "lightsaber"; /* Key exchange */
-    ssl_opts.CApath = "/home/jash/Documentos/Maestria/certs/pqcerts2/ca.crt";
-
+    ssl_opts.CApath = "/home/jash/Documentos/Maestria/certs/azure/ca.crt";
     conn_opts.keepAliveInterval = 20;
     conn_opts.cleansession = 1;
     conn_opts.onSuccess = onConnect;
