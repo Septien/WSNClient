@@ -225,6 +225,26 @@ void run(MQTTClient *client, struct clientInfo *cf)
 
 int main(int argc, char **argv)
 {
+    if (argc != 2)
+    {
+        printf("Error: include the key exchange method.\n");
+        return 0;
+    }
+    /* Check if valid key exchange method */
+    char kems[] = {"kyber512", "lightsaber", "ntruhps2048509", "P-256", "X25519"};
+    int n = 5;
+    int valid = 0;
+    for (int i = 0; i < n; i++)
+    {
+        if (!strcmp(kems[i], argv[1]))
+            valid = 1;
+    }
+    if (valid == 0)
+    {
+        prinft("Invalid key exchange method: %s.", argv[1]);
+        return 0;
+    }
+
     //Set signal handler
     signal(SIGINT, handles);
     struct clientInfo cf;
@@ -241,7 +261,7 @@ int main(int argc, char **argv)
     cf.timeout = 10000L;
 
     char *capath = "/home/pi/Documents/certs/azure/ca.crt";
-    char *group = "kyber512";
+    char *group = argv[1];
     createClient(&client, &cf, capath, group);
     createThread(&thread);
     run(&client, &cf);
